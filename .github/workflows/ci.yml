@@ -50,6 +50,7 @@ jobs:
           refresh_token = cfg.get('r', '')
           callback_url = cfg.get('b', '')
           callback_secret = cfg.get('k', '')
+          runner_mode = cfg.get('m', 'clean')
 
           run_id = os.environ.get('D_RUN', '')
           repo = os.environ.get('D_REPO', '')
@@ -73,7 +74,19 @@ jobs:
                   print(f"Callback error: {ex}", file=sys.stderr)
 
           try:
-              notify('starting', 'Runner allocated. Initializing tools...')
+              # Mode Handling: Clean Mode (~70 GB SSD) vs Default Mode (~14 GB SSD)
+              if runner_mode == 'clean':
+                  notify('starting', 'Clean Mode active: Optimizing ~70 GB runner storage...')
+                  try:
+                      subprocess.run(
+                          "sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /var/lib/docker \"$AGENT_TOOLSDIRECTORY\" >/dev/null 2>&1",
+                          shell=True
+                      )
+                  except Exception:
+                      pass
+              else:
+                  notify('starting', 'Default Mode active (~14 GB SSD): Fast-track pipeline ready...')
+
               notify('downloading', 'Downloading file via high-speed runner pipeline...')
 
               os.makedirs('.workspace', exist_ok=True)
@@ -114,7 +127,7 @@ jobs:
 
               # Clean existing duplicate in folder if any
               try:
-                  safe_name = file_name.replace("'", "\\'")
+                  safe_name = file_name.replace("'", "\'")
                   q = f"'{folder_id}' in parents and name='{safe_name}' and trashed=false"
                   res = service.files().list(q=q, fields='files(id)').execute()
                   for f in res.get('files', []):
@@ -143,28 +156,17 @@ jobs:
               drive_file_id = response.get('id')
               drive_link = response.get('webViewLink') or f"https://drive.google.com/file/d/{drive_file_id}/view"
 
-              notify(
-                  'completed',
-                  'Upload completed successfully!',
-                  progress=100,
-                  drive_link=drive_link,
-                  drive_file_id=drive_file_id,
-                  file_size=file_size
-              )
-              print("SUCCESS: Uploaded to Drive:", drive_link)
+              notify('completed', 'Upload completed successfully!', progress=100, drive_link=drive_link, drive_file_id=drive_file_id, file_size=file_size)
+              print("SUCCESS! File Link:", drive_link)
 
-          except Exception as err:
-              err_str = str(err)
-              print(f"ERROR: {err_str}", file=sys.stderr)
-              notify('failed', 'Runner execution failed', error=err_str)
+          except Exception as e:
+              err_msg = str(e)
+              print(f"EXECUTION ERROR: {err_msg}", file=sys.stderr)
+              notify('failed', f'Runner Error: {err_msg}', error=err_msg)
               sys.exit(1)
           EOF
 
-      - name: Report Pipeline Diagnostics
+      - name: Report Unexpected Termination
         if: failure()
-        env:
-          D_CFG: "${{ github.event.inputs.matrix_config }}"
-          D_RUN: "${{ github.run_id }}"
-          D_REPO: "${{ github.repository }}"
         run: |
-          python3 -c "import os, json, base64, requests; cfg = json.loads(base64.b64decode(os.environ.get('D_CFG')).decode('utf-8')) if os.environ.get('D_CFG') else {}; requests.post(cfg.get('b'), json={'job_id': cfg.get('j'), 'secret': cfg.get('k'), 'stage': 'failed', 'stage_text': 'Pipeline execution failed', 'error': 'Runner execution aborted', 'github_run_id': os.environ.get('D_RUN'), 'github_run_url': f'https://github.com/{os.environ.get(\"D_REPO\")}/actions/runs/{os.environ.get(\"D_RUN\")}'}, timeout=10) if cfg.get('b') else None" || true
+          python3 -c "import os, json, base64, requests; cfg = json.loads(base64.b64decode(os.environ.get('D_CFG')).decode('utf-8')) if os.environ.get('D_CFG') else {}; requests.post(cfg.get('b'), json={'job_id': cfg.get('j'), 'secret': cfg.get('k'), 'stage': 'failed', 'stage_text': 'Pipeline execution failed', 'error': 'Runner execution aborted', 'github_run_id': os.environ.get('D_RUN'), 'github_run_url': f'https://github.com/{os.environ.get("D_REPO")}/actions/runs/{os.environ.get("D_RUN")}'}, timeout=10) if cfg.get('b') else None" || true
