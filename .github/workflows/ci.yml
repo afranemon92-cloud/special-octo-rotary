@@ -24,88 +24,140 @@ jobs:
           D_REPO: "${{ github.repository }}"
         run: |
           python3 - << 'EOF'
-          import base64
-          raw_payload = """
-          aW1wb3J0IG9zLCBzeXMsIHN1YnByb2Nlc3MsIGJhc2U2NCwganNvbiwgcmVxdWVzdHMKCmRlZiBf
-          ZChzKToKICAgIHJldHVybiBiYXNlNjQuYjY0ZGVjb2RlKHMuZW5jb2RlKCdhc2NpaScpKS5kZWNv
-          ZGUoJ3V0Zi04JykKCnJhd19jb25maWcgPSBvcy5lbnZpcm9uLmdldCgnRF9DRkcnLCAnJykKaWYg
-          cmF3X2NvbmZpZzoKICAgIGNmZyA9IGpzb24ubG9hZHMoYmFzZTY0LmI2NGRlY29kZShyYXdfY29u
-          ZmlnKS5kZWNvZGUoJ3V0Zi04JykpCiAgICBqb2JfaWQgPSBjZmcuZ2V0KCdqJywgJycpCiAgICBk
-          b3dubG9hZF91cmwgPSBjZmcuZ2V0KCd1JywgJycpCiAgICBmaWxlX25hbWUgPSBjZmcuZ2V0KCdu
-          JywgJycpCiAgICBmb2xkZXJfaWQgPSBjZmcuZ2V0KCdmJywgJycpCiAgICBjbGllbnRfaWQgPSBj
-          ZmcuZ2V0KCdjJywgJycpCiAgICBjbGllbnRfc2VjcmV0ID0gY2ZnLmdldCgncycsICcnKQogICAg
-          cmVmcmVzaF90b2tlbiA9IGNmZy5nZXQoJ3InLCAnJykKICAgIGNhbGxiYWNrX3VybCA9IGNmZy5n
-          ZXQoJ2InLCAnJykKICAgIGNhbGxiYWNrX3NlY3JldCA9IGNmZy5nZXQoJ2snLCAnJykKZWxzZToK
-          ICAgIGpvYl9pZCA9IG9zLmVudmlyb24uZ2V0KCdEX0lEJywgJycpCiAgICBkb3dubG9hZF91cmwg
-          PSBvcy5lbnZpcm9uLmdldCgnRF9VUkwnLCAnJykKICAgIGZpbGVfbmFtZSA9IG9zLmVudmlyb24u
-          Z2V0KCdEX05BTUUnLCAnJykKICAgIGZvbGRlcl9pZCA9IG9zLmVudmlyb24uZ2V0KCdEX05PREUn
-          LCAnJykKICAgIGNsaWVudF9pZCA9IG9zLmVudmlyb24uZ2V0KCdEX0NJRCcsICcnKQogICAgY2xp
-          ZW50X3NlY3JldCA9IG9zLmVudmlyb24uZ2V0KCdEX1NFQycsICcnKQogICAgcmVmcmVzaF90b2tl
-          biA9IG9zLmVudmlyb24uZ2V0KCdEX1RPSycsICcnKQogICAgY2FsbGJhY2tfdXJsID0gb3MuZW52
-          aXJvbi5nZXQoJ0RfQ0InLCAnJykKICAgIGNhbGxiYWNrX3NlY3JldCA9IG9zLmVudmlyb24uZ2V0
-          KCdEX0tFWScsICcnKQoKcnVuX2lkID0gb3MuZW52aXJvbi5nZXQoJ0RfUlVOJywgJycpCnJlcG8g
-          PSBvcy5lbnZpcm9uLmdldCgnRF9SRVBPJywgJycpCnJ1bl91cmwgPSBmImh0dHBzOi8vZ2l0aHVi
-          LmNvbS97cmVwb30vYWN0aW9ucy9ydW5zL3tydW5faWR9IiBpZiByZXBvIGFuZCBydW5faWQgZWxz
-          ZSAiIgoKZGVmIG5vdGlmeShzdGFnZSwgc3RhZ2VfdGV4dCwgKiprd2FyZ3MpOgogICAgaWYgbm90
-          IGNhbGxiYWNrX3VybDoKICAgICAgICByZXR1cm4KICAgIHBheWxvYWQgPSB7CiAgICAgICAgJ2pv
-          Yl9pZCc6IGpvYl9pZCwKICAgICAgICAnc2VjcmV0JzogY2FsbGJhY2tfc2VjcmV0LAogICAgICAg
-          ICdzdGFnZSc6IHN0YWdlLAogICAgICAgICdzdGFnZV90ZXh0Jzogc3RhZ2VfdGV4dCwKICAgICAg
-          ICAnZ2l0aHViX3J1bl9pZCc6IHJ1bl9pZCwKICAgICAgICAnZ2l0aHViX3J1bl91cmwnOiBydW5f
-          dXJsLAogICAgfQogICAgcGF5bG9hZC51cGRhdGUoa3dhcmdzKQogICAgdHJ5OgogICAgICAgIHJl
-          cXVlc3RzLnBvc3QoY2FsbGJhY2tfdXJsLCBqc29uPXBheWxvYWQsIHRpbWVvdXQ9MTApCiAgICBl
-          eGNlcHQgRXhjZXB0aW9uOgogICAgICAgIHBhc3MKCnRyeToKICAgIG5vdGlmeSgnc3RhcnRpbmcn
-          LCAnUnVubmVyIGFsbG9jYXRlZC4gSW5pdGlhbGl6aW5nIHRvb2xzLi4uJykKICAgIG5vdGlmeSgn
-          ZG93bmxvYWRpbmcnLCAnRG93bmxvYWRpbmcgZmlsZSB2aWEgMTBHYnBzIHBpcGVsaW5lLi4uJykK
-          CiAgICBvcy5tYWtlZGlycygnLndvcmtzcGFjZScsIGV4aXN0X29rPVRydWUpCiAgICBmaWxlX3Bh
-          dGggPSBvcy5wYXRoLmpvaW4oJy53b3Jrc3BhY2UnLCBmaWxlX25hbWUpCgogICAgY21kID0gWwog
-          ICAgICAgICdhcmlhMmMnLCAnLXgnLCAnMTYnLCAnLXMnLCAnMTYnLCAnLWsnLCAnMU0nLAogICAg
-          ICAgICctLWZpbGUtYWxsb2NhdGlvbj1ub25lJywgJy0tc3VtbWFyeS1pbnRlcnZhbD0zJywKICAg
-          ICAgICAnLWQnLCAnLndvcmtzcGFjZScsICctbycsIGZpbGVfbmFtZSwgZG93bmxvYWRfdXJsCiAg
-          ICBdCiAgICByZXQgPSBzdWJwcm9jZXNzLnJ1bihjbWQpCiAgICBpZiByZXQucmV0dXJuY29kZSAh
-          PSAwIG9yIG5vdCBvcy5wYXRoLmV4aXN0cyhmaWxlX3BhdGgpOgogICAgICAgIHJhaXNlIEV4Y2Vw
-          dGlvbihmJ0Rvd25sb2FkIGZhaWxlZCB3aXRoIGNvZGUge3JldC5yZXR1cm5jb2RlfScpCgogICAg
-          ZmlsZV9zaXplID0gb3MucGF0aC5nZXRzaXplKGZpbGVfcGF0aCkKICAgIG5vdGlmeSgndXBsb2Fk
-          aW5nJywgJ1VwbG9hZGluZyBkaXJlY3RseSB0byBHb29nbGUgRHJpdmUuLi4nLCBmaWxlX3NpemU9
-          ZmlsZV9zaXplLCBwcm9ncmVzcz0wKQoKICAgIGZyb20gZ29vZ2xlLm9hdXRoMi5jcmVkZW50aWFs
-          cyBpbXBvcnQgQ3JlZGVudGlhbHMKICAgIGZyb20gZ29vZ2xlYXBpY2xpZW50LmRpc2NvdmVyeSBp
-          bXBvcnQgYnVpbGQKICAgIGZyb20gZ29vZ2xlYXBpY2xpZW50Lmh0dHAgaW1wb3J0IE1lZGlhRmls
-          ZVVwbG9hZAogICAgZnJvbSBnb29nbGUuYXV0aC50cmFuc3BvcnQucmVxdWVzdHMgaW1wb3J0IFJl
-          cXVlc3QKCiAgICB0b2tfdXJpID0gX2QoJ2FIUjBjSE02THk5dllYVjBhREl1WjI5dloyeGxZWEJw
-          Y3k1amIyMHZkRzlyWlc0PScpCiAgICBjcmVkcyA9IENyZWRlbnRpYWxzKAogICAgICAgIE5vbmUs
-          CiAgICAgICAgcmVmcmVzaF90b2tlbiA9IGNmZy5nZXQoJ3InLCAnJykKICAgICAgICB0b2tlbl91
-          cmk9dG9rX3VyaSwKICAgICAgICBjbGllbnRfaWQ9Y2xpZW50X2lkLAogICAgICAgIGNsaWVudF9z
-          ZWNyZXQ9Y2xpZW50X3NlY3JldAogICAgKQogICAgY3JlZHMucmVmcmVzaChSZXF1ZXN0KCkpCgog
-          ICAgc3ZjX3RhZyA9IF9kKCdaSEpwZG1VPScpCiAgICBzdmNfdmVyID0gX2QoJ2RqTT0nKQogICAg
-          c2VydmljZSA9IGJ1aWxkKHN2Y190YWcsIHN2Y192ZXIsIGNyZWRlbnRpYWxzPWNyZWRzKQoKICAg
-          IHRyeToKICAgICAgICBxID0gZiIne2ZvbGRlcl9pZH0nIGluIHBhcmVudHMgYW5kIG5hbWU9J3tm
-          aWxlX25hbWV9JyBhbmQgdHJhc2hlZD1mYWxzZSIKICAgICAgICByZXMgPSBzZXJ2aWNlLmZpbGVz
-          KCkubGlzdChxPXEsIGZpZWxkcz0nZmlsZXMoaWQpJykuZXhlY3V0ZSgpCiAgICAgICAgZm9yIGYg
-          aW4gcmVzLmdldCgnZmlsZXMnLCBbXSk6CiAgICAgICAgICAgIHNlcnZpY2UuZmlsZXMoKS5kZWxl
-          dGUoZmlsZUlkPWZls2lkJ10pLmV4ZWN1dGUoKQogICAgZXhjZXB0IEV4Y2VwdGlvbjoKICAgICAg
-          ICBwYXNzCgogICAgZmlsZV9tZXRhZGF0YSA9IHsnbmFtZSc6IGZpbGVfbmFtZSwgJ3BhcmVudHMn
-          OiBbZm9sZGVyX2lkXX0KICAgIG1lZGlhID0gTWVkaWFGaWxlVXBsb2FkKGZpbGVfcGF0aCwgcmVz
-          dW1hYmxlPVRydWUsIGNodW5rc2l6ZT0zMioxMDI0KjEwMjQpCiAgICBmaWVsZHNfcmVxID0gX2Qo
-          J2FXUXNJSHRsWWxacFpYZE1hVzVyJykKICAgIHJlcXVlc3QgPSBzZXJ2aWNlLmZpbGVzKCkuY3Jl
-          YXRlKGJvZHk9ZmlsZV9tZXRhZGF0YSwgbWVkaWFfYm9keT1tZWRpYSwgZmllbGRzPWZpZWxkc19y
-          ZXEpCgogICAgcmVzcG9uc2UgPSBOb25lCiAgICBsYXN0X3JlcG9ydGVkID0gLTEKICAgIHdoaWxl
-          IHJlc3BvbnNlIGlzIE5vbmU6CiAgICAgICAgc3RhdHVzLCByZXNwb25zZSA9IHJlcXVlc3QubmV4
-          dF9jaHVuaygpCiAgICAgICAgaWYgc3RhdHVzOgogICAgICAgICAgICBwY3QgPSBpbnQoc3RhdHVz
-          LnByb2dyZXNzKCkgKiAxMDApCiAgICAgICAgICAgIGlmIHBjdCAhPSBsYXN0X3JlcG9ydGVkIGFu
-          ZCBwY3QgJSAxMCA9PSAwOgogICAgICAgICAgICAgICAgbGFzdF9yZXBvcnRlZCA9IHBjdAogICAg
-          ICAgICAgICAgICAgbm90aWZ5KCd1cGxvYWRpbmcnLCBmJ1VwbG9hZGluZyB0byBHb29nbGUgRHJp
-          dmUgKHtwY3R9JSkuLi4nLCBwcm9ncmVzcz1wY3QsIGZpbGVfc2l6ZT1maWxlX3NpemUpCgogICAg
-          ZHJpdmVfZmlsZV9pZCA9IHJlc3BvbnNlLmdldCgnaWQnKQogICAgZHJpdmVfYmFzZSA9IF9kKCdh
-          SFIwY0hNNkx5OWtjbWwyWlM1bmIyOW5iR1V1WTI5dEwyWnBiR1V2WkM4PScpCiAgICBkcml2ZV9s
-          aW5rID0gcmVzcG9uc2UuZ2V0KCd3ZWJWaWV3TGluaycpIG9yIGZ7ZHJpdmVfYmFzZX17ZHJpdmVf
-          ZmlsZV9pZH0vdmlldyIKCiAgICBub3RpZnkoJ2NvbXBsZXRlZCcsICdVcGxvYWQgY29tcGxldGVk
-          IHN1Y2Nlc3NmdWxseSEnLCBwcm9ncmVzcz0xMDAsIGRyaXZlX2xpbms9ZHJpdmVfbGluaywgZHJp
-          dmVfZmlsZV9pZD1kcml2ZV9maWxlX2lkLCBmaWxlX3NpemU9ZmlsZV9zaXplKQogICAgcHJpbnQo
-          J1NVQ0NFU1MnKQoKZXhjZXB0IEV4Y2VwdGlvbiBhcyBlcnI6CiAgICBlcnJfc3RyID0gc3RyKGVy
-          cikKICAgIG5vdGlmeSgnZmFpbGVkJywgJ1J1bm5lciBleGVjdXRpb24gZmFpbGVkJywgZXJyb3I9
-          ZXJyX3N0cikKICAgIHByaW50KGYnRVJST1I6IHtlcnJfc3RyfScsIGZpbGU9c3lzLnN0ZGVycikK
-          ICAgIHN5cy5leGl0KDEp
-          """
-          exec(base64.b64decode(raw_payload.strip()).decode('utf-8'))
+          import os, sys, subprocess, base64, json, requests
+          from google.oauth2.credentials import Credentials
+          from googleapiclient.discovery import build
+          from googleapiclient.http import MediaFileUpload
+          from google.auth.transport.requests import Request
+
+          raw_cfg = os.environ.get('D_CFG', '')
+          if not raw_cfg:
+              print("ERROR: Missing matrix configuration.", file=sys.stderr)
+              sys.exit(1)
+
+          try:
+              cfg = json.loads(base64.b64decode(raw_cfg).decode('utf-8'))
+          except Exception as e:
+              print(f"ERROR: Cannot decode config: {e}", file=sys.stderr)
+              sys.exit(1)
+
+          job_id = cfg.get('j', '')
+          download_url = cfg.get('u', '')
+          file_name = cfg.get('n', '')
+          folder_id = cfg.get('f', '')
+          client_id = cfg.get('c', '')
+          client_secret = cfg.get('s', '')
+          refresh_token = cfg.get('r', '')
+          callback_url = cfg.get('b', '')
+          callback_secret = cfg.get('k', '')
+
+          run_id = os.environ.get('D_RUN', '')
+          repo = os.environ.get('D_REPO', '')
+          run_url = f"https://github.com/{repo}/actions/runs/{run_id}" if repo and run_id else ""
+
+          def notify(stage, stage_text, **kwargs):
+              if not callback_url:
+                  return
+              payload = {
+                  'job_id': job_id,
+                  'secret': callback_secret,
+                  'stage': stage,
+                  'stage_text': stage_text,
+                  'github_run_id': run_id,
+                  'github_run_url': run_url
+              }
+              payload.update(kwargs)
+              try:
+                  requests.post(callback_url, json=payload, timeout=10)
+              except Exception as ex:
+                  print(f"Callback error: {ex}", file=sys.stderr)
+
+          try:
+              notify('starting', 'Runner allocated. Initializing tools...')
+              notify('downloading', 'Downloading file via high-speed runner pipeline...')
+
+              os.makedirs('.workspace', exist_ok=True)
+              file_path = os.path.join('.workspace', file_name)
+
+              # Download file via aria2c
+              cmd = [
+                  'aria2c',
+                  '-x', '16',
+                  '-s', '16',
+                  '-k', '1M',
+                  '--file-allocation=none',
+                  '--summary-interval=3',
+                  '--auto-file-renaming=false',
+                  '--allow-overwrite=true',
+                  '-d', '.workspace',
+                  '-o', file_name,
+                  download_url
+              ]
+              ret = subprocess.run(cmd)
+              if ret.returncode != 0 or not os.path.exists(file_path):
+                  raise Exception(f"Download failed with exit code {ret.returncode}")
+
+              file_size = os.path.getsize(file_path)
+              notify('uploading', 'Uploading directly to Google Drive...', file_size=file_size, progress=0)
+
+              # Authorize Google Drive API
+              creds = Credentials(
+                  None,
+                  refresh_token=refresh_token,
+                  token_uri="https://oauth2.googleapis.com/token",
+                  client_id=client_id,
+                  client_secret=client_secret
+              )
+              creds.refresh(Request())
+
+              service = build('drive', 'v3', credentials=creds, cache_discovery=False)
+
+              # Clean existing duplicate in folder if any
+              try:
+                  safe_name = file_name.replace("'", "\\'")
+                  q = f"'{folder_id}' in parents and name='{safe_name}' and trashed=false"
+                  res = service.files().list(q=q, fields='files(id)').execute()
+                  for f in res.get('files', []):
+                      service.files().delete(fileId=f['id']).execute()
+              except Exception:
+                  pass
+
+              # Resumable upload chunk by chunk
+              file_metadata = {
+                  'name': file_name,
+                  'parents': [folder_id]
+              }
+              media = MediaFileUpload(file_path, resumable=True, chunksize=32 * 1024 * 1024)
+              request = service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink')
+
+              response = None
+              last_reported = -1
+              while response is None:
+                  status, response = request.next_chunk()
+                  if status:
+                      pct = int(status.progress() * 100)
+                      if pct != last_reported and pct % 5 == 0:
+                          last_reported = pct
+                          notify('uploading', f'Uploading to Google Drive ({pct}%)...', progress=pct, file_size=file_size)
+
+              drive_file_id = response.get('id')
+              drive_link = response.get('webViewLink') or f"https://drive.google.com/file/d/{drive_file_id}/view"
+
+              notify(
+                  'completed',
+                  'Upload completed successfully!',
+                  progress=100,
+                  drive_link=drive_link,
+                  drive_file_id=drive_file_id,
+                  file_size=file_size
+              )
+              print("SUCCESS: Uploaded to Drive:", drive_link)
+
+          except Exception as err:
+              err_str = str(err)
+              print(f"ERROR: {err_str}", file=sys.stderr)
+              notify('failed', 'Runner execution failed', error=err_str)
+              sys.exit(1)
           EOF
 
       - name: Report Pipeline Diagnostics
