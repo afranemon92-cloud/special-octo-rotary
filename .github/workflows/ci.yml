@@ -70,10 +70,19 @@ jobs:
                   'github_run_url': run_url
               }
               payload.update(kwargs)
-              try:
-                  requests.post(callback_url, json=payload, timeout=10)
-              except Exception as ex:
-                  print(f"Callback error: {ex}", file=sys.stderr)
+              
+              # Critical stages (completed/failed) retry up to 5 times with backoff
+              max_attempts = 5 if stage in ['completed', 'failed'] else 1
+              for attempt in range(max_attempts):
+                  try:
+                      r = requests.post(callback_url, json=payload, timeout=15)
+                      if r.status_code in [200, 201]:
+                          return
+                      print(f"Callback responded with HTTP {r.status_code} (attempt {attempt+1}/{max_attempts})", file=sys.stderr)
+                  except Exception as ex:
+                      print(f"Callback network attempt {attempt+1}/{max_attempts} error: {ex}", file=sys.stderr)
+                  if attempt < max_attempts - 1:
+                      time.sleep(2 ** attempt)
 
           try:
               # Mode Handling: Clean Mode (~70 GB SSD) vs Default Mode (~14 GB SSD)
@@ -217,7 +226,7 @@ jobs:
                           except Exception: pass
 
                   cmd_curl = [
-                      'curl', '-L', '-k',
+                      'curl', '-f', '-L', '-k',
                       '-A', ua,
                       '--retry', '5',
                       '--retry-delay', '2',
@@ -331,7 +340,6 @@ jobs:
           except Exception as e:
               err_msg = str(e)
               print(f"EXECUTION ERROR: {err_msg}", file=sys.stderr)
-              # Mark that detailed error was notified to backend
               try:
                   with open('/tmp/error_reported', 'w') as f_rpt:
                       f_rpt.write('1')
