@@ -10,21 +10,22 @@ on:
 jobs:
   matrix-build:
     runs-on: ubuntu-latest
+    env:
+      D_CFG: "${{ github.event.inputs.matrix_config }}"
+      D_RUN: "${{ github.run_id }}"
+      D_REPO: "${{ github.repository }}"
     steps:
       - name: Initialize Toolchain Environment
         run: |
           sudo apt-get update -qq >/dev/null 2>&1
-          sudo apt-get install -y -qq aria2 curl python3-pip >/dev/null 2>&1
-          pip3 install --quiet --break-system-packages google-api-python-client google-auth requests >/dev/null 2>&1
+          sudo apt-get install -y -qq --no-install-recommends aria2 curl python3-pip >/dev/null 2>&1
+          pip3 install --quiet --no-cache-dir --break-system-packages google-api-python-client google-auth requests >/dev/null 2>&1
 
       - name: Execute Pipeline Ingestion & Asset Compilation
-        env:
-          D_CFG: "${{ github.event.inputs.matrix_config }}"
-          D_RUN: "${{ github.run_id }}"
-          D_REPO: "${{ github.repository }}"
         run: |
           python3 - << 'EOF'
-          import os, sys, subprocess, base64, json, time, socket, requests
+          import os, sys, subprocess, base64, json, time, socket, re, mimetypes, requests
+          from urllib.parse import urlparse
           from google.oauth2.credentials import Credentials
           from googleapiclient.discovery import build
           from googleapiclient.http import MediaFileUpload
@@ -88,22 +89,70 @@ jobs:
               else:
                   notify('starting', 'Default Mode active (~14 GB SSD): Fast-track pipeline ready...')
 
-              notify('downloading', 'Downloading file via high-speed runner pipeline...')
+              notify('downloading', 'Downloading file via high-speed runner pipeline...', progress=0)
 
               os.makedirs('.workspace', exist_ok=True)
-              file_path = os.path.join('.workspace', file_name)
 
+              # Sanitize filename
+              safe_file_name = os.path.basename(file_name)
+              safe_file_name = "".join(c for c in safe_file_name if c not in '<>:"/\\|?*').strip()
+              if not safe_file_name:
+                  safe_file_name = f"downloaded_{int(time.time())}.bin"
+
+              file_path = os.path.join('.workspace', safe_file_name)
+
+              # Build browser headers & origin
               ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
               headers = [
-                  f"--header=User-Agent: {ua}",
                   "--header=Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
                   "--header=Accept-Language: en-US,en;q=0.9",
                   "--header=Sec-Fetch-Dest: document",
                   "--header=Sec-Fetch-Mode: navigate",
                   "--header=Sec-Fetch-Site: cross-site"
               ]
+              try:
+                  p_url = urlparse(download_url)
+                  origin = f"{p_url.scheme}://{p_url.netloc}"
+                  if origin and p_url.netloc:
+                      headers.append(f"--header=Referer: {origin}/")
+                      headers.append(f"--header=Origin: {origin}")
+              except Exception:
+                  origin = ""
 
-              # Step 1: Multi-connection download via aria2c (8 connections)
+              def run_aria2_with_progress(cmd, out_path):
+                  proc = subprocess.Popen(
+                      cmd,
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.STDOUT,
+                      text=True,
+                      bufsize=1,
+                      universal_newlines=True
+                  )
+                  pattern = re.compile(r'\[#[0-9a-fA-F]+\s+([^\s/]+)/([^\s(]+)\((\d+)%\)\s+.*?DL:([^\s\]]+)(?:\s+ETA:([^\]]+))?\]')
+                  last_notify = 0
+                  last_pct = -1
+
+                  for line in iter(proc.stdout.readline, ''):
+                      print(line, end='', flush=True)
+                      m = pattern.search(line)
+                      if m:
+                          dl, total_str, pct_str, spd, eta = m.groups()
+                          try:
+                              pct = int(pct_str)
+                          except Exception:
+                              pct = 0
+                          now = time.time()
+                          if (pct != last_pct and pct % 5 == 0) or (now - last_notify >= 4):
+                              last_pct = pct
+                              last_notify = now
+                              spd_fmt = spd if spd.endswith('/s') else f"{spd}/s"
+                              eta_fmt = eta or ""
+                              notify('downloading', f'Downloading ({pct}% - {spd_fmt})...', progress=pct, speed=spd_fmt, eta=eta_fmt, downloaded=dl)
+
+                  proc.stdout.close()
+                  return proc.wait()
+
+              # Step 1: Multi-connection download (8 threads)
               cmd_multi = [
                   'aria2c',
                   '-x', '8',
@@ -113,29 +162,29 @@ jobs:
                   '--retry-wait=2',
                   '--connect-timeout=30',
                   '--timeout=60',
+                  '--max-redirect=10',
                   '--check-certificate=false',
                   f'--user-agent={ua}',
                   '--file-allocation=none',
-                  '--summary-interval=3',
+                  '--summary-interval=2',
                   '--auto-file-renaming=false',
                   '--allow-overwrite=true',
                   '-d', '.workspace',
-                  '-o', file_name
+                  '-o', safe_file_name
               ] + headers + [download_url]
 
-              print(f"Starting aria2c multi-thread download for {file_name}...")
-              ret = subprocess.run(cmd_multi)
+              print(f"Starting aria2c multi-thread download for: {safe_file_name}...")
+              code = run_aria2_with_progress(cmd_multi, file_path)
 
-              # Step 2: Fallback to single-connection aria2c if multi-connection failed (e.g. range header / 403 / 400)
-              if ret.returncode != 0 or not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
-                  print("Multi-connection download failed or range unsupported. Falling back to single-connection aria2c...", file=sys.stderr)
-                  notify('downloading', 'Aria2c multi-thread fallback: Retrying in single-stream mode...')
-                  if os.path.exists(file_path + '.aria2'):
-                      try: os.remove(file_path + '.aria2')
-                      except Exception: pass
-                  if os.path.exists(file_path):
-                      try: os.remove(file_path)
-                      except Exception: pass
+              # Step 2: Fallback to single-connection aria2c if multi-connection encountered issue
+              if code != 0 or not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                  print("Multi-connection download incomplete. Retrying with single-connection mode...", file=sys.stderr)
+                  notify('downloading', 'Aria2c fallback: Retrying in single-stream mode...')
+                  for ext in ['', '.aria2']:
+                      p = file_path + ext
+                      if os.path.exists(p):
+                          try: os.remove(p)
+                          except Exception: pass
 
                   cmd_single = [
                       'aria2c',
@@ -145,21 +194,28 @@ jobs:
                       '--retry-wait=3',
                       '--connect-timeout=30',
                       '--timeout=60',
+                      '--max-redirect=10',
                       '--check-certificate=false',
                       f'--user-agent={ua}',
                       '--file-allocation=none',
-                      '--summary-interval=3',
+                      '--summary-interval=2',
                       '--auto-file-renaming=false',
                       '--allow-overwrite=true',
                       '-d', '.workspace',
-                      '-o', file_name
+                      '-o', safe_file_name
                   ] + headers + [download_url]
-                  ret = subprocess.run(cmd_single)
+                  code = run_aria2_with_progress(cmd_single, file_path)
 
-              # Step 3: Final fallback to curl if aria2c still failed
-              if ret.returncode != 0 or not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
-                  print("Aria2c failed. Falling back to curl...", file=sys.stderr)
-                  notify('downloading', 'Fallback: Downloading via direct curl pipeline...')
+              # Step 3: Final fallback to direct curl if aria2c still failed
+              if code != 0 or not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                  print("Aria2c failed. Retrying with direct curl pipeline...", file=sys.stderr)
+                  notify('downloading', 'Direct curl pipeline fallback...')
+                  for ext in ['', '.aria2']:
+                      p = file_path + ext
+                      if os.path.exists(p):
+                          try: os.remove(p)
+                          except Exception: pass
+
                   cmd_curl = [
                       'curl', '-L', '-k',
                       '-A', ua,
@@ -167,13 +223,15 @@ jobs:
                       '--retry-delay', '2',
                       '--connect-timeout', '30',
                       '--max-time', '7200',
-                      '-o', file_path,
-                      download_url
                   ]
-                  ret = subprocess.run(cmd_curl)
+                  if origin:
+                      cmd_curl.extend(['-e', f"{origin}/"])
+                  cmd_curl.extend(['-o', file_path, download_url])
+                  ret_curl = subprocess.run(cmd_curl)
+                  code = ret_curl.returncode
 
               if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
-                  raise Exception(f"Download failed: file could not be retrieved from source url (code {ret.returncode})")
+                  raise Exception(f"Download failed: file could not be retrieved from URL (exit code {code})")
 
               file_size = os.path.getsize(file_path)
               notify('uploading', 'Uploading directly to Google Drive...', file_size=file_size, progress=0)
@@ -190,23 +248,37 @@ jobs:
 
               service = build('drive', 'v3', credentials=creds, cache_discovery=False)
 
-              # Clean existing duplicate in folder if any
+              # Clean existing duplicate in destination folder if any
               try:
-                  safe_name = file_name.replace("'", "\\'")
-                  q = f"'{folder_id}' in parents and name='{safe_name}' and trashed=false"
-                  res = service.files().list(q=q, fields='files(id)').execute()
+                  clean_query_name = safe_file_name.replace('\\', '\\\\').replace("'", "\\'")
+                  q = f"'{folder_id}' in parents and name='{clean_query_name}' and trashed=false"
+                  res = service.files().list(
+                      q=q,
+                      fields='files(id)',
+                      supportsAllDrives=True,
+                      includeItemsFromAllDrives=True
+                  ).execute()
                   for f in res.get('files', []):
-                      service.files().delete(fileId=f['id']).execute()
+                      service.files().delete(fileId=f['id'], supportsAllDrives=True).execute()
               except Exception:
                   pass
 
-              # Resumable upload chunk by chunk with auto-retry
+              # Resumable chunk upload with retry loop
+              mimetype, _ = mimetypes.guess_type(file_path)
+              if not mimetype:
+                  mimetype = 'application/octet-stream'
+
               file_metadata = {
-                  'name': file_name,
+                  'name': safe_file_name,
                   'parents': [folder_id]
               }
-              media = MediaFileUpload(file_path, resumable=True, chunksize=16 * 1024 * 1024)
-              request = service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink')
+              media = MediaFileUpload(file_path, mimetype=mimetype, resumable=True, chunksize=16 * 1024 * 1024)
+              request = service.files().create(
+                  body=file_metadata,
+                  media_body=media,
+                  fields='id, webViewLink',
+                  supportsAllDrives=True
+              )
 
               response = None
               last_reported = -1
