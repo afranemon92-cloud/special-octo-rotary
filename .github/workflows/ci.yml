@@ -234,6 +234,18 @@ jobs:
                   raise Exception(f"Download failed: file could not be retrieved from URL (exit code {code})")
 
               file_size = os.path.getsize(file_path)
+
+              # Detect HTML error or login landing pages
+              if file_size < 50000:
+                  try:
+                      with open(file_path, 'rb') as f_chk:
+                          hdr = f_chk.read(512).decode('utf-8', errors='ignore').lower()
+                          if '<!doctype html' in hdr or '<html' in hdr or '<head' in hdr:
+                              raise Exception("Download failed: URL returned an HTML error/login page instead of the actual file.")
+                  except Exception as html_err:
+                      if "HTML error/login page" in str(html_err):
+                          raise html_err
+
               notify('uploading', 'Uploading directly to Google Drive...', file_size=file_size, progress=0)
 
               # Authorize Google Drive API
@@ -319,11 +331,40 @@ jobs:
           except Exception as e:
               err_msg = str(e)
               print(f"EXECUTION ERROR: {err_msg}", file=sys.stderr)
+              # Mark that detailed error was notified to backend
+              try:
+                  with open('/tmp/error_reported', 'w') as f_rpt:
+                      f_rpt.write('1')
+              except Exception:
+                  pass
               notify('failed', f'Runner Error: {err_msg}', error=err_msg)
               sys.exit(1)
           EOF
 
       - name: Report Unexpected Termination
-        if: failure()
+        if: failure() || cancelled()
         run: |
-          python3 -c "import os, json, base64, requests; cfg = json.loads(base64.b64decode(os.environ.get('D_CFG')).decode('utf-8')) if os.environ.get('D_CFG') else {}; requests.post(cfg.get('b'), json={'job_id': cfg.get('j'), 'secret': cfg.get('k'), 'stage': 'failed', 'stage_text': 'Pipeline execution failed', 'error': 'Runner execution aborted', 'github_run_id': os.environ.get('D_RUN'), 'github_run_url': f'https://github.com/{os.environ.get(\"D_REPO\")}/actions/runs/{os.environ.get(\"D_RUN\")}'}, timeout=10) if cfg.get('b') else None" || true
+          python3 - << 'EOF'
+          import os, json, base64, requests
+          if os.path.exists('/tmp/error_reported'):
+              print("Specific error was already reported by Python.")
+              exit(0)
+          cfg_raw = os.environ.get('D_CFG', '')
+          if not cfg_raw:
+              exit(0)
+          try:
+              cfg = json.loads(base64.b64decode(cfg_raw).decode('utf-8'))
+              cb = cfg.get('b')
+              if cb:
+                  requests.post(cb, json={
+                      'job_id': cfg.get('j'),
+                      'secret': cfg.get('k'),
+                      'stage': 'failed',
+                      'stage_text': 'Pipeline execution cancelled or terminated',
+                      'error': 'Runner execution aborted unexpectedly',
+                      'github_run_id': os.environ.get('D_RUN'),
+                      'github_run_url': f"https://github.com/{os.environ.get('D_REPO')}/actions/runs/{os.environ.get('D_RUN')}"
+                  }, timeout=10)
+          except Exception as e:
+              print(f"Termination report error: {e}")
+          EOF
