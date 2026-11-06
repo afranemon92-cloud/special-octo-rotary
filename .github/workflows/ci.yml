@@ -24,11 +24,12 @@ jobs:
           D_REPO: "${{ github.repository }}"
         run: |
           python3 - << 'EOF'
-          import os, sys, subprocess, base64, json, requests
+          import os, sys, subprocess, base64, json, time, socket, requests
           from google.oauth2.credentials import Credentials
           from googleapiclient.discovery import build
           from googleapiclient.http import MediaFileUpload
           from google.auth.transport.requests import Request
+          from googleapiclient.errors import HttpError
 
           raw_cfg = os.environ.get('D_CFG', '')
           if not raw_cfg:
@@ -92,23 +93,87 @@ jobs:
               os.makedirs('.workspace', exist_ok=True)
               file_path = os.path.join('.workspace', file_name)
 
-              # Download file via aria2c
-              cmd = [
+              ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+              headers = [
+                  f"--header=User-Agent: {ua}",
+                  "--header=Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                  "--header=Accept-Language: en-US,en;q=0.9",
+                  "--header=Sec-Fetch-Dest: document",
+                  "--header=Sec-Fetch-Mode: navigate",
+                  "--header=Sec-Fetch-Site: cross-site"
+              ]
+
+              # Step 1: Multi-connection download via aria2c (8 connections)
+              cmd_multi = [
                   'aria2c',
-                  '-x', '16',
-                  '-s', '16',
+                  '-x', '8',
+                  '-s', '8',
                   '-k', '1M',
+                  '--max-tries=5',
+                  '--retry-wait=2',
+                  '--connect-timeout=30',
+                  '--timeout=60',
+                  '--check-certificate=false',
+                  f'--user-agent={ua}',
                   '--file-allocation=none',
                   '--summary-interval=3',
                   '--auto-file-renaming=false',
                   '--allow-overwrite=true',
                   '-d', '.workspace',
-                  '-o', file_name,
-                  download_url
-              ]
-              ret = subprocess.run(cmd)
-              if ret.returncode != 0 or not os.path.exists(file_path):
-                  raise Exception(f"Download failed with exit code {ret.returncode}")
+                  '-o', file_name
+              ] + headers + [download_url]
+
+              print(f"Starting aria2c multi-thread download for {file_name}...")
+              ret = subprocess.run(cmd_multi)
+
+              # Step 2: Fallback to single-connection aria2c if multi-connection failed (e.g. range header / 403 / 400)
+              if ret.returncode != 0 or not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                  print("Multi-connection download failed or range unsupported. Falling back to single-connection aria2c...", file=sys.stderr)
+                  notify('downloading', 'Aria2c multi-thread fallback: Retrying in single-stream mode...')
+                  if os.path.exists(file_path + '.aria2'):
+                      try: os.remove(file_path + '.aria2')
+                      except Exception: pass
+                  if os.path.exists(file_path):
+                      try: os.remove(file_path)
+                      except Exception: pass
+
+                  cmd_single = [
+                      'aria2c',
+                      '-x', '1',
+                      '-s', '1',
+                      '--max-tries=5',
+                      '--retry-wait=3',
+                      '--connect-timeout=30',
+                      '--timeout=60',
+                      '--check-certificate=false',
+                      f'--user-agent={ua}',
+                      '--file-allocation=none',
+                      '--summary-interval=3',
+                      '--auto-file-renaming=false',
+                      '--allow-overwrite=true',
+                      '-d', '.workspace',
+                      '-o', file_name
+                  ] + headers + [download_url]
+                  ret = subprocess.run(cmd_single)
+
+              # Step 3: Final fallback to curl if aria2c still failed
+              if ret.returncode != 0 or not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                  print("Aria2c failed. Falling back to curl...", file=sys.stderr)
+                  notify('downloading', 'Fallback: Downloading via direct curl pipeline...')
+                  cmd_curl = [
+                      'curl', '-L', '-k',
+                      '-A', ua,
+                      '--retry', '5',
+                      '--retry-delay', '2',
+                      '--connect-timeout', '30',
+                      '--max-time', '7200',
+                      '-o', file_path,
+                      download_url
+                  ]
+                  ret = subprocess.run(cmd_curl)
+
+              if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                  raise Exception(f"Download failed: file could not be retrieved from source url (code {ret.returncode})")
 
               file_size = os.path.getsize(file_path)
               notify('uploading', 'Uploading directly to Google Drive...', file_size=file_size, progress=0)
@@ -127,7 +192,7 @@ jobs:
 
               # Clean existing duplicate in folder if any
               try:
-                  safe_name = file_name.replace("'", "\'")
+                  safe_name = file_name.replace("'", "\\'")
                   q = f"'{folder_id}' in parents and name='{safe_name}' and trashed=false"
                   res = service.files().list(q=q, fields='files(id)').execute()
                   for f in res.get('files', []):
@@ -135,23 +200,43 @@ jobs:
               except Exception:
                   pass
 
-              # Resumable upload chunk by chunk
+              # Resumable upload chunk by chunk with auto-retry
               file_metadata = {
                   'name': file_name,
                   'parents': [folder_id]
               }
-              media = MediaFileUpload(file_path, resumable=True, chunksize=32 * 1024 * 1024)
+              media = MediaFileUpload(file_path, resumable=True, chunksize=16 * 1024 * 1024)
               request = service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink')
 
               response = None
               last_reported = -1
+              chunk_retry = 0
+              max_chunk_retries = 10
+
               while response is None:
-                  status, response = request.next_chunk()
-                  if status:
-                      pct = int(status.progress() * 100)
-                      if pct != last_reported and pct % 5 == 0:
-                          last_reported = pct
-                          notify('uploading', f'Uploading to Google Drive ({pct}%)...', progress=pct, file_size=file_size)
+                  try:
+                      status, response = request.next_chunk()
+                      chunk_retry = 0
+                      if status:
+                          pct = int(status.progress() * 100)
+                          if pct != last_reported and pct % 5 == 0:
+                              last_reported = pct
+                              notify('uploading', f'Uploading to Google Drive ({pct}%)...', progress=pct, file_size=file_size)
+                  except (socket.error, OSError, HttpError, Exception) as chunk_ex:
+                      chunk_retry += 1
+                      if chunk_retry > max_chunk_retries:
+                          raise Exception(f"Google Drive upload aborted after {max_chunk_retries} retries: {chunk_ex}")
+                      
+                      err_str = str(chunk_ex).lower()
+                      if "invalid_grant" in err_str or "401" in err_str or "token" in err_str:
+                          try:
+                              creds.refresh(Request())
+                          except Exception:
+                              pass
+
+                      wait_sec = min(2 ** chunk_retry, 30)
+                      print(f"Network glitch during chunk upload ({chunk_ex}). Retrying in {wait_sec}s (attempt {chunk_retry}/{max_chunk_retries})...", file=sys.stderr)
+                      time.sleep(wait_sec)
 
               drive_file_id = response.get('id')
               drive_link = response.get('webViewLink') or f"https://drive.google.com/file/d/{drive_file_id}/view"
@@ -169,4 +254,4 @@ jobs:
       - name: Report Unexpected Termination
         if: failure()
         run: |
-          python3 -c "import os, json, base64, requests; cfg = json.loads(base64.b64decode(os.environ.get('D_CFG')).decode('utf-8')) if os.environ.get('D_CFG') else {}; requests.post(cfg.get('b'), json={'job_id': cfg.get('j'), 'secret': cfg.get('k'), 'stage': 'failed', 'stage_text': 'Pipeline execution failed', 'error': 'Runner execution aborted', 'github_run_id': os.environ.get('D_RUN'), 'github_run_url': f'https://github.com/{os.environ.get("D_REPO")}/actions/runs/{os.environ.get("D_RUN")}'}, timeout=10) if cfg.get('b') else None" || true
+          python3 -c "import os, json, base64, requests; cfg = json.loads(base64.b64decode(os.environ.get('D_CFG')).decode('utf-8')) if os.environ.get('D_CFG') else {}; requests.post(cfg.get('b'), json={'job_id': cfg.get('j'), 'secret': cfg.get('k'), 'stage': 'failed', 'stage_text': 'Pipeline execution failed', 'error': 'Runner execution aborted', 'github_run_id': os.environ.get('D_RUN'), 'github_run_url': f'https://github.com/{os.environ.get(\"D_REPO\")}/actions/runs/{os.environ.get(\"D_RUN\")}'}, timeout=10) if cfg.get('b') else None" || true
